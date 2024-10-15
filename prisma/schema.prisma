@@ -1,0 +1,31 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")  // Assurez-vous que DATABASE_URL est bien configuré
+}
+
+model Author {
+  id      Int     @id @default(autoincrement())
+  name    String  @db.VarChar(255)
+  books   Book[]
+}
+
+model Book {
+  id         Int      @id @default(autoincrement())
+  title      String   @db.VarChar(255)
+  author     Author   @relation(fields: [authorId], references: [id])
+  authorId   Int
+  category   Category @relation(fields: [categoryId], references: [id])
+  categoryId Int
+}
+
+model Category {
+  id      Int    @id @default(autoincrement())
+  name    String @db.VarChar(255)
+  books   Book[]
+}
