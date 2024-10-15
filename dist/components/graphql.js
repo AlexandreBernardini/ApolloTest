@@ -1,100 +1,134 @@
 import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { PrismaClient } from '@prisma/client';
+import DataLoader from 'dataloader';
 // Instancier Prisma Client pour interagir avec la base de données
 const prisma = new PrismaClient();
+// DataLoader pour les réalisateurs
+const directorsLoader = new DataLoader(async (directorIds) => {
+    const directors = await prisma.director.findMany({
+        where: { id: { in: [...directorIds] } },
+    });
+    const directorMap = directors.reduce((map, director) => {
+        map[director.id] = director;
+        return map;
+    }, {});
+    return directorIds.map(id => directorMap[id]);
+});
+// DataLoader pour les genres
+const genresLoader = new DataLoader(async (genreIds) => {
+    const genres = await prisma.genre.findMany({
+        where: { id: { in: [...genreIds] } },
+    });
+    const genreMap = genres.reduce((map, genre) => {
+        map[genre.id] = genre;
+        return map;
+    }, {});
+    return genreIds.map(id => genreMap[id]);
+});
+// DataLoader pour les utilisateurs (liés aux évaluations)
+const usersLoader = new DataLoader(async (userIds) => {
+    const users = await prisma.user.findMany({
+        where: { id: { in: [...userIds] } },
+    });
+    const userMap = users.reduce((map, user) => {
+        map[user.id] = user;
+        return map;
+    }, {});
+    return userIds.map(id => userMap[id]);
+});
 // Définition du schéma GraphQL
 const typeDefs = `#graphql
-    type Film {
-        id: Int!
-        title: String!
-        director: Director!
-        genre: Genre!
-        releaseYear: Int!
-        ratings: [Rating!]!
-    }
+  type Film {
+    id: Int!
+    title: String!
+    director: Director!
+    genre: Genre!
+    releaseYear: Int!
+    ratings: [Rating!]!
+  }
 
-    type Director {
-        id: Int!
-        name: String!
-        films: [Film!]!
-    }
+  type Director {
+    id: Int!
+    name: String!
+    films: [Film!]!
+  }
 
-    type Genre {
-        id: Int!
-        name: String!
-        films: [Film!]!
-    }
+  type Genre {
+    id: Int!
+    name: String!
+    films: [Film!]!
+  }
 
-    type User {
-        id: Int!
-        username: String!
-        ratings: [Rating!]!
-    }
+  type User {
+    id: Int!
+    username: String!
+    ratings: [Rating!]!
+  }
 
-    type Rating {
-        id: Int!
-        score: Int!
-        user: User!
-        film: Film!
-    }
+  type Rating {
+    id: Int!
+    score: Int!
+    user: User!
+    film: Film!
+  }
 
-    type Query {
-        films: [Film!]!
-        filmById(id: Int!): Film
-        directors: [Director!]!
-        genres: [Genre!]!
-        users: [User!]!
-    }
+  type Query {
+    films: [Film!]!
+    filmById(id: Int!): Film
+    directors: [Director!]!
+    genres: [Genre!]!
+    users: [User!]!
+  }
 
-    input CreateFilmInput {
-        title: String!
-        directorId: Int!
-        genreId: Int!
-        releaseYear: Int!
-    }
+  input CreateFilmInput {
+    title: String!
+    directorId: Int!
+    genreId: Int!
+    releaseYear: Int!
+  }
 
-    input UpdateFilmInput {
-        title: String
-        directorId: Int
-        genreId: Int
-        releaseYear: Int
-    }
+  input UpdateFilmInput {
+    title: String
+    directorId: Int
+    genreId: Int
+    releaseYear: Int
+  }
 
-    input CreateDirectorInput {
-        name: String!
-    }
+  input CreateDirectorInput {
+    name: String!
+  }
 
-    input CreateGenreInput {
-        name: String!
-    }
+  input CreateGenreInput {
+    name: String!
+  }
 
-    input CreateUserInput {
-        username: String!
-    }
+  input CreateUserInput {
+    username: String!
+  }
 
-    input CreateRatingInput {
-        score: Int!
-        userId: Int!
-        filmId: Int!
-    }
+  input CreateRatingInput {
+    score: Int!
+    userId: Int!
+    filmId: Int!
+  }
 
-    type Mutation {
-        createFilm(input: CreateFilmInput!): Film!
-        updateFilm(id: Int!, input: UpdateFilmInput!): Film!
-        createDirector(input: CreateDirectorInput!): Director!
-        createGenre(input: CreateGenreInput!): Genre!
-        createUser(input: CreateUserInput!): User!  # Ajout de la mutation pour créer un utilisateur
-        createRating(input: CreateRatingInput!): Rating!
-    }
+  type Mutation {
+    createFilm(input: CreateFilmInput!): Film!
+    updateFilm(id: Int!, input: UpdateFilmInput!): Film!
+    createDirector(input: CreateDirectorInput!): Director!
+    createGenre(input: CreateGenreInput!): Genre!
+    createUser(input: CreateUserInput!): User!
+    createRating(input: CreateRatingInput!): Rating!
+    deleteFilm(id: Int!): Film!
+  }
 `;
-// Résolveurs avec Prisma
+// Résolveurs avec Prisma et DataLoader
 const resolvers = {
     Query: {
         films: async () => {
-            return await prisma.film.findMany({
+            return prisma.film.findMany({
                 include: {
-                    director: true,
                     genre: true,
                     ratings: {
                         include: {
@@ -105,10 +139,9 @@ const resolvers = {
             });
         },
         filmById: async (_, { id }) => {
-            return await prisma.film.findUnique({
+            return prisma.film.findUnique({
                 where: { id },
                 include: {
-                    director: true,
                     genre: true,
                     ratings: {
                         include: {
@@ -119,24 +152,24 @@ const resolvers = {
             });
         },
         directors: async () => {
-            return await prisma.director.findMany({
+            return prisma.director.findMany({
                 include: { films: true },
             });
         },
         genres: async () => {
-            return await prisma.genre.findMany({
+            return prisma.genre.findMany({
                 include: { films: true },
             });
         },
         users: async () => {
-            return await prisma.user.findMany({
+            return prisma.user.findMany({
                 include: { ratings: true },
             });
         },
     },
     Mutation: {
         createFilm: async (_, { input }) => {
-            return await prisma.film.create({
+            return prisma.film.create({
                 data: {
                     title: input.title,
                     releaseYear: input.releaseYear,
@@ -150,7 +183,7 @@ const resolvers = {
             });
         },
         updateFilm: async (_, { id, input }) => {
-            return await prisma.film.update({
+            return prisma.film.update({
                 where: { id },
                 data: {
                     title: input.title ?? undefined,
@@ -167,28 +200,28 @@ const resolvers = {
             });
         },
         createDirector: async (_, { input }) => {
-            return await prisma.director.create({
+            return prisma.director.create({
                 data: {
                     name: input.name,
                 },
             });
         },
         createGenre: async (_, { input }) => {
-            return await prisma.genre.create({
+            return prisma.genre.create({
                 data: {
                     name: input.name,
                 },
             });
         },
         createUser: async (_, { input }) => {
-            return await prisma.user.create({
+            return prisma.user.create({
                 data: {
                     username: input.username,
                 },
             });
         },
         createRating: async (_, { input }) => {
-            return await prisma.rating.create({
+            return prisma.rating.create({
                 data: {
                     score: input.score,
                     user: { connect: { id: input.userId } },
@@ -200,20 +233,25 @@ const resolvers = {
                 },
             });
         },
+        deleteFilm: async (_, { id }) => {
+            return prisma.film.delete({
+                where: { id },
+                include: {
+                    director: true,
+                    genre: true,
+                },
+            });
+        },
     },
     Film: {
-        director: async (parent) => {
-            return await prisma.director.findUnique({
-                where: { id: parent.directorId },
-            });
+        director: async (parent, _, context) => {
+            return context.directorsLoader.load(parent.directorId);
         },
-        genre: async (parent) => {
-            return await prisma.genre.findUnique({
-                where: { id: parent.genreId },
-            });
+        genre: async (parent, _, context) => {
+            return context.genresLoader.load(parent.genreId);
         },
         ratings: async (parent) => {
-            return await prisma.rating.findMany({
+            return prisma.rating.findMany({
                 where: { filmId: parent.id },
                 include: { user: true },
             });
@@ -221,36 +259,42 @@ const resolvers = {
     },
     Director: {
         films: async (parent) => {
-            return await prisma.film.findMany({
+            return prisma.film.findMany({
                 where: { directorId: parent.id },
             });
         },
     },
     Genre: {
         films: async (parent) => {
-            return await prisma.film.findMany({
+            return prisma.film.findMany({
                 where: { genreId: parent.id },
             });
         },
     },
     User: {
         ratings: async (parent) => {
-            return await prisma.rating.findMany({
+            return prisma.rating.findMany({
                 where: { userId: parent.id },
                 include: { film: true },
             });
         },
     },
 };
-// Création du serveur Apollo avec Prisma et résolveurs
+// Création du serveur Apollo avec Prisma, Résolveurs et DataLoader
 const server = new ApolloServer({
     typeDefs,
     resolvers,
 });
-// Démarrage du serveur Apollo
+// Démarrage du serveur Apollo avec context dans `startStandaloneServer`
 const startServer = async () => {
     const { url } = await startStandaloneServer(server, {
         listen: { port: 4000 },
+        context: async () => ({
+            prisma,
+            directorsLoader,
+            genresLoader,
+            usersLoader,
+        }),
     });
     console.log(`🚀 Server ready at: ${url}`);
 };
